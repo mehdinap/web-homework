@@ -1,0 +1,56 @@
+# JWT authentication reverse proxy in front of a legacy service.
+#
+#   internet --(:80)--> proxy --[internal network]--> legacy-httpbin (:8081)
+#
+# * proxy is the only container on the edge network, so it is the only way in
+#   from outside. It listens on :8080, published on host port 80.
+# * legacy-httpbin publishes no ports and sits on an internal network with no
+#   gateway to the outside, so it can neither be reached nor reach out.
+services:
+  proxy:
+    build:
+      context: ./proxy
+    image: jwt-proxy:local
+    restart: unless-stopped
+    depends_on:
+      legacy-httpbin:
+        condition: service_healthy
+    environment:
+      LISTEN_ADDR: ":8080"
+      UPSTREAM_URL: "http://legacy-httpbin:8081"
+      # Shared HMAC secret; override it in a real deployment.
+      JWT_SECRET: "${JWT_SECRET:-dev-only-secret-change-me}"
+      # Demo user for POST /auth/login.
+      LOGIN_USER: "${LOGIN_USER:-student}"
+      LOGIN_PASSWORD: "${LOGIN_PASSWORD:-hunter2}"
+    ports:
+      - "80:8080"
+    networks:
+      - edge
+      - internal
+
+  legacy-httpbin:
+    image: ghcr.io/mccutchen/go-httpbin:2.26.0
+    restart: unless-stopped
+    # No `ports:` on purpose: reachable on the internal network only.
+    # go-httpbin is configured with CLI flags, not environment variables.
+    command: ["-port", "8081", "-use-real-hostname"]
+    networks:
+      - internal
+    healthcheck:
+      # The image has no shell and no curl/wget, so probe with the binary itself.
+      test: ["CMD", "/usr/bin/go-httpbin", "-version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  # Where the proxy is exposed to the outside world.
+  edge:
+    driver: bridge
+  # No gateway to the outside and no published ports: this is the internal
+  # network the legacy service lives on.
+  internal:
+    driver: bridge
+    internal: true

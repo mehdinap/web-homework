@@ -1,0 +1,5 @@
+# Local overrides for compose variables.
+.env
+
+# Built Go binary (produced by `go build`).
+proxy/proxy
